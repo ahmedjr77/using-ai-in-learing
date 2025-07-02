@@ -6,27 +6,26 @@ if "history" not in st.session_state:
     st.session_state.history = []
 
 # Step 2: Importing libraries
-import streamlit as st
 import google.generativeai as genai
 from PyPDF2 import PdfReader
 import os
+import json
 
 # Step 3: API Setup
 genai.configure(api_key='AIzaSyBFdfJLDdIj2pZcx1z4_VBbfnBupSPawIE')
 model = genai.GenerativeModel('gemini-2.0-flash')
 
-# -----------------------------
-# Sign In / Sign Up System (with file storage)
-# -----------------------------
-import json
-
 USER_FILE = "users.json"
+
+# -----------------------------
+# USERS SYSTEM
+# -----------------------------
 
 # Load existing users
 def load_users():
     if not os.path.exists(USER_FILE):
         with open(USER_FILE, "w") as f:
-            json.dump({}, f)  # empty dict for users
+            json.dump({}, f)
         return {}
 
     with open(USER_FILE, "r") as f:
@@ -46,55 +45,57 @@ def save_users(users):
     with open(USER_FILE, "w") as f:
         json.dump(users, f)
 
-# Register a new user
+# Register new user with structure
 def register_user(username, password):
     users = load_users()
     if username in users:
         return False
-    users[username] = password
+    users[username] = {
+        "password": password,
+        "subjects": []
+    }
     save_users(users)
     return True
 
-# Login check
+# Upgrade old users to new structure
+def upgrade_old_users():
+    users = load_users()
+    updated = False
+    for uname in users:
+        if isinstance(users[uname], str):
+            old_password = users[uname]
+            users[uname] = {
+                "password": old_password,
+                "subjects": []
+            }
+            updated = True
+    if updated:
+        save_users(users)
+
+# Run upgrade on startup
+upgrade_old_users()
+
+# Login check supports old & new structure
 def login_user(username, password):
     users = load_users()
-    return users.get(username) == password
+    user = users.get(username)
+    if not user:
+        return False
+    if isinstance(user, dict):
+        return user["password"] == password
+    return user == password
 
-# Session state init
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
+# Get subjects for a user
+def get_user_subjects(username):
+    users = load_users()
+    return users[username].get("subjects", [])
 
-# Login or Register
-if not st.session_state.logged_in:
-    st.title("🔐 Welcome to study.ai.helper")
-
-    tab1, tab2 = st.tabs(["🔓 Sign In", "📝 Sign Up"])
-
-    # --- Sign In Tab ---
-    with tab1:
-        uname = st.text_input("Username", key="login_user")
-        pwd = st.text_input("Password", type="password", key="login_pass")
-        if st.button("Login"):
-            if login_user(uname, pwd):
-                st.session_state.logged_in = True
-                st.session_state.user = uname
-                st.success("✅ Login successful!")
-                st.rerun()
-
-            else:
-                st.error("❌ Incorrect username or password.")
-
-    # --- Sign Up Tab ---
-    with tab2:
-        new_uname = st.text_input("Choose a Username", key="signup_user")
-        new_pwd = st.text_input("Choose a Password", type="password", key="signup_pass")
-        if st.button("Register"):
-            if register_user(new_uname, new_pwd):
-                st.success("✅ Registered successfully! Please sign in.")
-            else:
-                st.error("⚠️ Username already exists.")
-
-    st.stop()
+# Add subject to user
+def add_user_subject(username, new_subject):
+    users = load_users()
+    if new_subject not in users[username]["subjects"]:
+        users[username]["subjects"].append(new_subject)
+        save_users(users)
 
 # -----------------------------
 # History System
@@ -113,7 +114,7 @@ def save_history(history):
     with open(HISTORY_FILE, "w") as f:
         json.dump(history, f)
 
-# Add message to user's history
+# Add message to history
 def add_to_history(user, role, message):
     history = load_history()
     if user not in history:
@@ -126,42 +127,85 @@ def get_user_history(user):
     history = load_history()
     return history.get(user, [])
 
+# -----------------------------
+# Auth Flow
+# -----------------------------
 
-# -----------------------------------
-# Sidebar Navigation After Login
-# -----------------------------------
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+if not st.session_state.logged_in:
+    st.title("🔐 Welcome to study.ai.helper")
+
+    tab1, tab2 = st.tabs(["🔓 Sign In", "📝 Sign Up"])
+
+    with tab1:
+        uname = st.text_input("Username", key="login_user")
+        pwd = st.text_input("Password", type="password", key="login_pass")
+        if st.button("Login"):
+            if login_user(uname, pwd):
+                st.session_state.logged_in = True
+                st.session_state.user = uname
+                st.success("✅ Login successful!")
+                st.rerun()
+            else:
+                st.error("❌ Incorrect username or password.")
+
+    with tab2:
+        new_uname = st.text_input("Choose a Username", key="signup_user")
+        new_pwd = st.text_input("Choose a Password", type="password", key="signup_pass")
+        if st.button("Register"):
+            if register_user(new_uname, new_pwd):
+                st.success("✅ Registered successfully! Please sign in.")
+            else:
+                st.error("⚠️ Username already exists.")
+
+    st.stop()
+
+# -----------------------------
+# Sidebar Navigation
+# -----------------------------
+
 st.sidebar.title(f"👋 Welcome, {st.session_state.user}")
 section = st.sidebar.selectbox("Choose Feature", [
-    "🧠 Ask AI", 
-    "📄 Upload PDF & Summarize", 
+    "🧠 Ask AI",
+    "📄 Upload PDF & Summarize",
     "❓ Quiz Generator",
     "📜 History"
 ])
 
-# -------------------------------
-# 🧠 Ask AI Section
-# -------------------------------
+# -----------------------------
+# 🧠 Ask AI
+# -----------------------------
+
 if section == "🧠 Ask AI":
     st.title('🤖 Studying AI Assistant 📚')
-    subjects_options = ['🧬 Biology', '⚛️ Physics', '➗ Math', '🧪 Chemistry']
+
+    default_subjects = ['🧬 Biology', '⚛️ Physics', '➗ Math', '🧪 Chemistry']
+    user_subjects = get_user_subjects(st.session_state.user)
+    subjects_options = default_subjects + user_subjects
+
+    new_subject = st.text_input("➕ Add a new subject:")
+    if st.button("Add Subject"):
+        if new_subject.strip() != "":
+            add_user_subject(st.session_state.user, new_subject.strip())
+            st.success(f"✅ Added '{new_subject}' to your subjects.")
+            st.rerun()
+
     detials_options = ['📝 Brief', '📖 Medium', '📚 Detailed']
     tone_options = ['😊 Friendly', '💼 Professional']
     edu_level_options = ['🏫 Elementary', '👨‍🎓 Junior', '🎓 Senior']
 
-    # First row
     col1, col2 = st.columns(2)
     subject = col1.selectbox('📘 Choose a subject:', subjects_options)
     detials = col2.selectbox('🔍 Choose details level:', detials_options)
 
-    # Second row
     col3, col4 = st.columns(2)
     tone = col3.selectbox('🎭 Choose a tone:', tone_options)
     edu_level = col4.selectbox('🏷️ Choose educational level:', edu_level_options)
 
-    # Taking user question
     user_input = st.text_area('🧠 Enter your question:', height=150)
 
-    # Get AI response on button click
     if st.button('💡 Get Answer'):
         prompt = f"""
         You are an AI studying assistant helping a {edu_level} level student with {subject}.
@@ -175,20 +219,18 @@ if section == "🧠 Ask AI":
         st.markdown("### ✅ Answer:")
         st.write(answer)
 
-        # Save to chat history
         add_to_history(st.session_state.user, "user", user_input)
         add_to_history(st.session_state.user, "ai", answer)
 
-
+# -----------------------------
+# 📄 PDF Summarizer
+# -----------------------------
 
 elif section == "📄 Upload PDF & Summarize":
     st.title("🧠 Text & PDF Summarizer")
 
     summarization_type = st.radio("Choose input method:", ["📜 Enter Text", "📄 Upload PDF"])
 
-    # -------------------------------
-    # 📜 Manual Text Input Summarizer
-    # -------------------------------
     if summarization_type == "📜 Enter Text":
         input_text = st.text_area("✍️ Paste or type your text here:", height=300)
 
@@ -202,9 +244,6 @@ elif section == "📄 Upload PDF & Summarize":
                     st.markdown("### 📝 Text Summary:")
                     st.write(response.text)
 
-    # -------------------------------
-    # 📄 PDF Upload Summarizer
-    # -------------------------------
     elif summarization_type == "📄 Upload PDF":
         pdf_file = st.file_uploader("📄 Upload a PDF file", type=["pdf"])
 
@@ -224,10 +263,10 @@ elif section == "📄 Upload PDF & Summarize":
                         st.markdown("### 📑 PDF Summary:")
                         st.write(summary_response.text)
 
+# -----------------------------
+# ❓ Quiz Generator
+# -----------------------------
 
-# -------------------------------
-# ❓ Quiz Generator Section
-# -------------------------------
 elif section == "❓ Quiz Generator":
     st.title("❓ Generate Multiple-Choice Questions")
     quiz_topic = st.text_input("Enter a topic for quiz (e.g. Photosynthesis, Newton's Laws, etc.)")
@@ -241,10 +280,10 @@ elif section == "❓ Quiz Generator":
         st.markdown("### 🧪 Quiz:")
         st.write(quiz_response.text)
 
+# -----------------------------
+# 📜 History
+# -----------------------------
 
-# -------------------------------
-#  📜 History chat Section
-# -------------------------------
 elif section == "📜 History":
     st.title("📜 Your Chat History")
 
@@ -264,4 +303,5 @@ elif section == "📜 History":
             save_history(history)
             st.success("History cleared!")
             st.rerun()
+
 
