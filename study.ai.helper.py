@@ -268,17 +268,49 @@ elif section == "📄 Upload PDF & Summarize":
 # -----------------------------
 
 elif section == "❓ Quiz Generator":
-    st.title("❓ Generate Multiple-Choice Questions")
-    quiz_topic = st.text_input("Enter a topic for quiz (e.g. Photosynthesis, Newton's Laws, etc.)")
+    st.title("❓ Generate Quiz")
+
+    quiz_topic = st.text_input("Enter a topic for the quiz (e.g. Photosynthesis, Newton's Laws)")
+
+    num_questions = st.number_input(
+        "How many questions?",
+        min_value=1,
+        max_value=100,
+        value=5,
+        step=1
+    )
+
+    difficulty = st.selectbox(
+        "Select difficulty level:",
+        ["Easy", "Medium", "Hard"]
+    )
+
+    question_type = st.selectbox(
+        "Select question type:",
+        ["Multiple Choice", "Essay Questions"]
+    )
 
     if st.button("🎯 Generate Quiz"):
-        quiz_prompt = f"""
-        Generate 5 multiple-choice questions (each with 4 choices, and one correct answer marked) about: {quiz_topic}.
-        Format them clearly for students.
-        """
+        if question_type == "Multiple Choice":
+            quiz_prompt = f"""
+            You are an educational quiz generator.
+            Create {num_questions} multiple-choice questions about "{quiz_topic}".
+            Each question must have 4 answer options, with only one correct answer clearly marked.
+            Difficulty: {difficulty} level.
+            Format the quiz clearly for students.
+            """
+        else:  # Essay Questions
+            quiz_prompt = f"""
+            You are an educational quiz generator.
+            Create {num_questions} open-ended essay questions about "{quiz_topic}".
+            The questions should match a {difficulty} level.
+            Format them clearly for students.
+            """
+
         quiz_response = model.generate_content(quiz_prompt)
         st.markdown("### 🧪 Quiz:")
         st.write(quiz_response.text)
+
 
 # -----------------------------
 # 📜 History
