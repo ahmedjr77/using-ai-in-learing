@@ -310,6 +310,7 @@ elif section == "❓ Quiz Generator":
         quiz_response = model.generate_content(quiz_prompt)
         st.markdown("### 🧪 Quiz:")
         st.write(quiz_response.text)
+        st.download_button("Download Quiz", quiz_response.text, file_name='quiz.txt')
 
 
 # -----------------------------
@@ -335,5 +336,3 @@ elif section == "📜 History":
             save_history(history)
             st.success("History cleared!")
             st.rerun()
-
-
