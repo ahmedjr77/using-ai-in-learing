@@ -263,19 +263,21 @@ elif section == "📄 Upload PDF & Summarize":
                         st.markdown("### 📑 PDF Summary:")
                         st.write(summary_response.text)
 
+
+
 # -----------------------------
-# ❓ Quiz Generator
+# ❓ Quiz Generator (MCQ + Essay)
 # -----------------------------
 
 elif section == "❓ Quiz Generator":
     st.title("❓ Generate Quiz")
 
-    quiz_topic = st.text_input("Enter a topic for the quiz (e.g. Photosynthesis, Newton's Laws)")
+    quiz_topic = st.text_input("Enter a topic for the quiz (e.g. Photosynthesis, Climate Change)")
 
     num_questions = st.number_input(
         "How many questions?",
         min_value=1,
-        max_value=100,
+        max_value=20,
         value=5,
         step=1
     )
@@ -290,27 +292,151 @@ elif section == "❓ Quiz Generator":
         ["Multiple Choice", "Essay Questions"]
     )
 
+    if "quiz_data" not in st.session_state:
+        st.session_state.quiz_data = None
+    if "quiz_answers" not in st.session_state:
+        st.session_state.quiz_answers = {}
+
     if st.button("🎯 Generate Quiz"):
         if question_type == "Multiple Choice":
             quiz_prompt = f"""
             You are an educational quiz generator.
             Create {num_questions} multiple-choice questions about "{quiz_topic}".
-            Each question must have 4 answer options, with only one correct answer clearly marked.
+            Each question must have 4 answer options (A, B, C, D).
+            One correct answer must be clearly marked at the end as: Answer: X (where X is A/B/C/D).
+            Format:
+            1) Question text
+            A) Option A
+            B) Option B
+            C) Option C
+            D) Option D
+            Answer: X
             Difficulty: {difficulty} level.
-            Format the quiz clearly for students.
             """
-        else:  # Essay Questions
+        else:
             quiz_prompt = f"""
             You are an educational quiz generator.
             Create {num_questions} open-ended essay questions about "{quiz_topic}".
-            The questions should match a {difficulty} level.
-            Format them clearly for students.
+            Each question should match a {difficulty} level.
+            Format:
+            1) Question text
             """
 
         quiz_response = model.generate_content(quiz_prompt)
-        st.markdown("### 🧪 Quiz:")
-        st.write(quiz_response.text)
-        st.download_button("Download Quiz", quiz_response.text, file_name='quiz.txt')
+        quiz_text = quiz_response.text
+
+        if question_type == "Multiple Choice":
+            questions = []
+            blocks = quiz_text.strip().split('\n\n')
+            for block in blocks:
+                lines = block.strip().split('\n')
+                if len(lines) >= 6:
+                    question_text = lines[0][3:].strip()
+                    options = {
+                        'A': lines[1][3:].strip(),
+                        'B': lines[2][3:].strip(),
+                        'C': lines[3][3:].strip(),
+                        'D': lines[4][3:].strip(),
+                    }
+                    correct_line = [l for l in lines if l.startswith("Answer:")]
+                    correct_answer = correct_line[0].split("Answer:")[1].strip() if correct_line else ""
+                    questions.append({
+                        'question': question_text,
+                        'options': options,
+                        'answer': correct_answer
+                    })
+            st.session_state.quiz_data = questions
+
+        else:
+            questions = []
+            lines = quiz_text.strip().split('\n')
+            for line in lines:
+                if line.strip() and line[0].isdigit() and ')' in line:
+                    q_text = line.split(')', 1)[1].strip()
+                    questions.append({'question': q_text})
+            st.session_state.quiz_data = questions
+
+        st.session_state.quiz_answers = {}
+
+    if st.session_state.quiz_data:
+        st.subheader("📋 Take the Quiz")
+
+        if question_type == "Multiple Choice":
+            for idx, q in enumerate(st.session_state.quiz_data):
+                st.markdown(f"**Q{idx+1}: {q['question']}**")
+                selected = st.radio(
+                    f"Your Answer for Q{idx+1}:",
+                    list(q['options'].keys()),
+                    format_func=lambda x: f"{x}) {q['options'][x]}",
+                    key=f"q_{idx}"
+                )
+                st.session_state.quiz_answers[idx] = selected
+
+            if st.button("✅ Submit Quiz"):
+                score = 0
+                total = len(st.session_state.quiz_data)
+                results = []
+                for idx, q in enumerate(st.session_state.quiz_data):
+                    user_ans = st.session_state.quiz_answers.get(idx, None)
+                    correct_ans = q['answer']
+                    if user_ans == correct_ans:
+                        score += 1
+                    result_line = f"Q{idx+1}: ✅ Correct!" if user_ans == correct_ans else f"Q{idx+1}: ❌ Incorrect (Your: {user_ans}, Correct: {correct_ans})"
+                    results.append(result_line)
+
+                st.success(f"Your score: {score} / {total}")
+                st.markdown("### 🗒️ Detailed Results")
+                for res in results:
+                    st.write(res)
+
+                # SAVE TO HISTORY
+                add_to_history(
+                    st.session_state.user,
+                    "quiz",
+                    {
+                        "topic": quiz_topic,
+                        "type": "MCQ",
+                        "score": f"{score}/{total}",
+                        "results": results
+                    }
+                )
+
+                # Reset
+                st.session_state.quiz_data = None
+                st.session_state.quiz_answers = {}
+
+        else:
+            for idx, q in enumerate(st.session_state.quiz_data):
+                st.markdown(f"**Q{idx+1}: {q['question']}**")
+                essay_ans = st.text_area(f"Your Answer for Q{idx+1}:", key=f"essay_{idx}")
+                st.session_state.quiz_answers[idx] = essay_ans
+
+            if st.button("✅ Submit Essay Quiz"):
+                results = []
+                for idx, q in enumerate(st.session_state.quiz_data):
+                    user_ans = st.session_state.quiz_answers.get(idx, "")
+                    results.append(f"Q{idx+1}: {q['question']}\nYour Answer: {user_ans}\n")
+
+                st.success("✅ Your essay answers have been saved to your history.")
+                st.markdown("### 🗒️ Your Answers")
+                for res in results:
+                    st.write(res)
+
+                # SAVE TO HISTORY
+                add_to_history(
+                    st.session_state.user,
+                    "quiz",
+                    {
+                        "topic": quiz_topic,
+                        "type": "Essay",
+                        "results": results
+                    }
+                )
+
+                # Reset
+                st.session_state.quiz_data = None
+                st.session_state.quiz_answers = {}
+
 
 
 # -----------------------------
@@ -318,17 +444,42 @@ elif section == "❓ Quiz Generator":
 # -----------------------------
 
 elif section == "📜 History":
-    st.title("📜 Your Chat History")
+    st.title("📜 Your Chat & Quiz History")
 
     user_history = get_user_history(st.session_state.user)
 
     if not user_history:
-        st.info("No history found yet. Ask AI something first!")
+        st.info("No history found yet. Ask AI something or take a quiz first!")
     else:
         for i, item in enumerate(user_history):
-            role_icon = "👤" if item["role"] == "user" else "🤖"
-            st.markdown(f"**{role_icon} {item['role'].capitalize()}**: {item['message']}")
-            st.markdown("---")
+            role = item["role"]
+            message = item["message"]
+
+            if role == "quiz":
+                st.markdown(f"### 📝 Quiz")
+                st.markdown(f"**Topic:** {message.get('topic', 'Unknown')}")
+                st.markdown(f"**Score:** {message.get('score', 'N/A')}")
+
+                for idx, q in enumerate(message.get("questions", [])):
+                    st.markdown(f"**Q{idx+1}: {q['question']}**")
+                    if "options" in q:
+                        # It's MCQ
+                        for option_key, option_value in q["options"].items():
+                            st.markdown(f"- {option_key}) {option_value}")
+                        st.markdown(f"**✅ Correct Answer:** {q['correct_answer']}")
+                        st.markdown(f"**📝 Your Answer:** {q['user_answer']}")
+                    else:
+                        # It's Essay
+                        st.markdown(f"**📝 Your Answer:** {q['user_answer']}")
+                        st.markdown(f"**✅ Suggested Answer:** {q['correct_answer']}")
+
+                    st.markdown("---")
+
+            else:
+                # Normal AI chat history
+                role_icon = "👤" if role == "user" else "🤖"
+                st.markdown(f"**{role_icon} {role.capitalize()}**: {message}")
+                st.markdown("---")
 
         if st.button("🗑️ Clear My History"):
             history = load_history()
@@ -336,3 +487,4 @@ elif section == "📜 History":
             save_history(history)
             st.success("History cleared!")
             st.rerun()
+
